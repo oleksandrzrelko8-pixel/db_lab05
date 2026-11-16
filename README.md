@@ -81,11 +81,11 @@ ORDER BY total_spent DESC;
 
 | № запиту | Опис запиту | Метод сканування | Оціночна вартість (Cost) | Фактичний час (Actual Time) |
 | :--- | :--- | :--- | :--- | :--- |
-| Запит 1 | Агрегація витрат клієнтів із фільтром за `order_date` | `Seq Scan on repair_orders`, `Seq Scan on cars` | `0.00..485.50` | `14.82 ms` |
+| Запит 1 | Агрегація витрат клієнтів із фільтром за `order_date` | `Seq Scan on repair_orders`, `Seq Scan on cars` | `0.00..485.50` | `13.58 ms` |
 | Запит 2 | Вибірка нарядів за статусом `Completed` та сортування за `total_cost DESC` | `Seq Scan on repair_orders` + `Sort` | `0.00..392.10` | `9.45 ms` |
 | Запит 3 | Пошук автомобілів клієнта та історії обслуговування за `client_id` | `Seq Scan on cars`, `Hash Join` | `0.00..310.25` | `6.78 ms` |
 
-
+![Аналіз продуктивності до оптимізації](lab05_screenshots/01_explain_before.png.jpg)
 
 ### Крок 2. Створення B-tree індексів та перевірка покращення продуктивності
 
@@ -124,11 +124,11 @@ ORDER BY total_spent DESC;
 
 | № запиту | Метод сканування ПІСЛЯ оптимізації | Час ДО індексів | Час ПІСЛЯ індексів | Покращення |
 | :--- | :--- | :--- | :--- | :--- |
-| Запит 1 | `Bitmap Index Scan on idx_orders_date` + `Index Scan on idx_cars_client_id` | `14.82 ms` | `2.31 ms` | Прискорення на **84.4%** |
+| Запит 1 | `Bitmap Index Scan on idx_orders_date` + `Index Scan on idx_cars_client_id` | `13.58 ms` | `2.31 ms` | Прискорення на **83.0%** |
 | Запит 2 | `Index Scan using idx_orders_total_cost` | `9.45 ms` | `1.15 ms` | Прискорення на **87.8%** |
 | Запит 3 | `Index Scan using idx_cars_client_id` + `idx_orders_car_id` | `6.78 ms` | `0.84 ms` | Прискорення на **87.6%** |
 
-
+![Перевірка продуктивності після створення індексів](lab05_screenshots/02_indexes_explain_after.png.jpg)
 
 ### Крок 3. Створення представлень (VIEW) для спрощення доступу до даних
 
@@ -167,7 +167,7 @@ GROUP BY cl.client_id, cl.first_name, cl.last_name, cl.phone;
 SELECT * FROM v_client_statistics ORDER BY total_spent DESC LIMIT 10;
 ```
 
-
+![Перевірка роботи представлень VIEW](lab05_screenshots/03_views.png.jpg)
 
 ### Крок 4. Базовий тригер для автоматичного логування операцій
 
@@ -203,6 +203,8 @@ AFTER INSERT ON clients
 FOR EACH ROW
 EXECUTE FUNCTION log_client_insert();
 
+DELETE FROM clients WHERE email = 'zakharchenko@ukr.net';
+
 -- Тестова вставка клієнта для перевірки спрацювання тригера
 INSERT INTO clients (first_name, last_name, phone, email)
 VALUES ('Денис', 'Захарченко', '+380507654321', 'zakharchenko@ukr.net');
@@ -213,7 +215,7 @@ ORDER BY log_id DESC
 LIMIT 5;
 ```
 
-
+![Робота базового тригера логування](lab05_screenshots/04_audit_trigger.png.jpg)
 
 ### Крок 5. Керування користувачами та розмежування прав доступу
 
@@ -240,7 +242,7 @@ WHERE grantee = 'report_viewer'
 ORDER BY table_name;
 ```
 
-
+![Налаштування прав доступу користувача](lab05_screenshots/05_user_permissions.png.jpg)
 
 ### Крок 6. Оновлюване представлення через систему правил (`RULES` — Рівень 2)
 
@@ -268,7 +270,7 @@ WHERE client_id = 1;
 SELECT * FROM v_client_contacts WHERE client_id = 1;
 ```
 
-
+![Оновлення даних через представлення з RULE](lab05_screenshots/06_updatable_view_rule.png.jpg)
 
 ### Крок 7. Тригер валідації даних (`BEFORE`) та комплексна система логування (`INSERT`, `UPDATE`, `DELETE` — Рівень 2)
 
@@ -327,6 +329,8 @@ AFTER INSERT OR UPDATE OR DELETE ON clients
 FOR EACH ROW
 EXECUTE FUNCTION comprehensive_audit_log();
 
+DELETE FROM clients WHERE email = 'audit.test@gmail.com';
+
 -- Тестування системи аудиту (INSERT + UPDATE + DELETE)
 INSERT INTO clients (first_name, last_name, phone, email)
 VALUES ('Тест', 'Аудит', '+380679876543', 'audit.test@gmail.com');
@@ -350,7 +354,7 @@ ORDER BY log_id DESC
 LIMIT 5;
 ```
 
-
+![Валідація даних та повний аудит операцій](lab05_screenshots/07_validation_and_full_audit.png.jpg)
 
 ### Крок 8. Часткові індекси (Partial Indexes) та резервне копіювання (`pg_dump` — Рівень 2)
 
@@ -377,7 +381,7 @@ WHERE status = 'Completed' AND order_date >= '2024-09-01'
 ORDER BY order_date DESC;
 ```
 
-
+![Часткові індекси та план виконання](lab05_screenshots/08_partial_indexes.png.jpg)
 
 #### Команди резервного копіювання та відновлення (`pg_dump` / `pg_restore`)
 
@@ -436,10 +440,11 @@ psql -U postgres -h localhost -d test_autoservice_restore -f backup_autoservice.
 ## Висновки
 
 Під час виконання лабораторної роботи №5 було досліджено методи оптимізації продуктивності, автоматизації та адміністрування бази даних PostgreSQL:
-1. За допомогою `EXPLAIN (ANALYZE, BUFFERS)` проаналізовано плани виконання запитів та усунено вузькі місця типу `Seq Scan` шляхом створення B-tree і часткових індексів, що скоротило час виконання тестових запитів на 84–88%.
+1. За допомогою `EXPLAIN (ANALYZE, BUFFERS)` проаналізовано плани виконання запитів та усунено вузькі місця типу `Seq Scan` шляхом створення B-tree і часткових індексів, що скоротило час виконання тестових запитів на 83–88%.
 2. Розроблено прості й агреговані представлення (`VIEW`), а також оновлюване представлення з використанням правил (`CREATE RULE ... DO INSTEAD`).
 3. Побудовано комплексну систему контролю якості та аудиту даних: `BEFORE`-тригер з регулярними виразами для перевірки телефонів та email і `AFTER`-тригер для логування операцій `INSERT`, `UPDATE`, `DELETE` у форматі `JSONB`.
 4. Налаштовано розмежування прав доступу для ролі `report_viewer` та опрацьовано регламент резервного копіювання й відновлення за допомогою `pg_dump` та `pg_restore`.
 
 - **Самооцінка:** 4 (добре)
 - **Обґрунтування:** Повністю виконано всі завдання Рівня 1 та Рівня 2, проведено вимірювання планів виконання до та після індексації, реалізовано тригери валідації й аудиту, оновлювані представлення та процедуру резервного копіювання.
+
